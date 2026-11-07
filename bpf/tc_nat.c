@@ -136,6 +136,7 @@ static __always_inline int handle_ipv4(void *data_end, struct iphdr *iph)
         if (u->check != 0) {
             csum_replace(&u->check, &old_saddr, &new_saddr, 4);
             csum_replace(&u->check, &old_sport, &new_sport, 2);
+            udp_csum_fixup(&u->check);
         }
         u->source = new_sport;
     }
@@ -222,6 +223,7 @@ static __always_inline int handle_ipv6(void *data_end, struct ipv6hdr *iph)
             return TC_ACT_OK;
         csum_replace(&u->check, old_saddr, new_saddr, 16);
         csum_replace(&u->check, &old_sport, &new_sport, 2);
+        udp_csum_fixup(&u->check);
         u->source = new_sport;
     }
     /* First fragment of a fragmented reply: remember the rewrite for the rest of it. Keyed by the

@@ -573,6 +573,15 @@ static __always_inline void csum_replace(__u16 *csum_be, void *old_val, void *ne
     *csum_be = (__u16)(~sum & 0xffff);
 }
 
+/* Call after updating a UDP checksum. The update above yields 0x0000 exactly when a full
+ * computation would give 0, but UDP sends a computed 0 as 0xFFFF (RFC 768): on the wire, 0
+ * means "no checksum", and IPv6 receivers must discard such datagrams (RFC 8200 8.1). */
+static __always_inline void udp_csum_fixup(__u16 *csum_be)
+{
+    if (*csum_be == 0)
+        *csum_be = 0xffff;
+}
+
 /* Simple, fast, non-cryptographic 5-tuple mix — good enough for Maglev slot
  * selection, not a security boundary. */
 static __always_inline __u32 rivora_hash5(__u32 saddr, __u32 daddr, __u16 sport, __u16 dport, __u8 proto)

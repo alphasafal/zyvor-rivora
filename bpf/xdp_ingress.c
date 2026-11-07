@@ -1033,6 +1033,7 @@ static __always_inline int handle_ipv4(struct xdp_md *ctx, void *data, void *dat
         if (u->check != 0) { /* UDP checksum 0 means "unset", leave it */
             csum_replace(&u->check, &old_daddr, &new_daddr, 4);
             csum_replace(&u->check, &old_dport, &new_dport, 2);
+            udp_csum_fixup(&u->check);
         }
         u->dest = new_dport;
     }
@@ -1323,6 +1324,7 @@ static __always_inline int handle_ipv6(struct xdp_md *ctx, void *data, void *dat
             return XDP_PASS;
         csum_replace(&u->check, old_daddr, new_daddr, 16);
         csum_replace(&u->check, &old_dport, &new_dport, 2);
+        udp_csum_fixup(&u->check);
         u->dest = new_dport;
     }
     __builtin_memcpy(&iph->daddr, new_daddr, 16);
