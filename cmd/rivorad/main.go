@@ -326,6 +326,7 @@ func main() {
 			targets = append(targets, healthcheck.Target{BackendID: t.ID, Address: t.Address, Port: t.Port, Probe: t.Probe})
 		}
 		checker.SetTargets(targets)
+		syncBackendHealth(plane, checker, targets, logger)
 	}
 	refreshTargets()
 	go checker.Run()
@@ -442,6 +443,7 @@ func main() {
 				targets = append(targets, healthcheck.Target{BackendID: t.ID, Address: t.Address, Port: t.Port, Probe: t.Probe})
 			}
 			checker.SetTargets(targets)
+			syncBackendHealth(plane, checker, targets, logger)
 			if sp != nil {
 				sp.AnnounceNow()
 			}
@@ -762,4 +764,18 @@ func ipString(ip net.IP) string {
 		return "none"
 	}
 	return ip.String()
+}
+
+// syncBackendHealth re-applies the checker's view to the dataplane after the
+// target set changes. ReloadVIPs removes before it upserts, so a reload can
+// hand a backend its old ID back after the dataplane re-created it as healthy;
+// the checker keeps that backend's state and, because OnChange fires only on a
+// transition, would never correct the dataplane. It also undoes a stale
+// OnChange from a probe that finished between the reload and SetTargets.
+func syncBackendHealth(plane *dataplane.Dataplane, checker *healthcheck.Checker, targets []healthcheck.Target, logger *slog.Logger) {
+	for _, t := range targets {
+		if err := plane.SetBackendHealth(t.BackendID, checker.IsHealthy(t.BackendID)); err != nil {
+			logger.Error("update backend health", "backend", t.BackendID, "err", err)
+		}
+	}
 }

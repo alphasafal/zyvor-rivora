@@ -109,6 +109,56 @@ func TestProbeOneRecoversAtSuccessThreshold(t *testing.T) {
 	}
 }
 
+func TestSetTargetsResetsStateWhenBackendIDIsReused(t *testing.T) {
+	var mu sync.Mutex
+	var changes []bool
+	c := newChecker(1, 1, func(id uint32, healthy bool) {
+		mu.Lock()
+		changes = append(changes, healthy)
+		mu.Unlock()
+	})
+
+	// Backend X with ID 5 goes down.
+	oldTarget := Target{BackendID: 5, Address: "127.0.0.1", Port: closedPort(t)}
+	c.SetTargets([]Target{oldTarget})
+	c.probeOne(oldTarget)
+	if c.IsHealthy(5) {
+		t.Fatal("backend X should be down after a failed probe at FailThreshold=1")
+	}
+
+	// ID 5 is released and reused for backend Y, which the dataplane starts as
+	// healthy. Y is also down, so the checker must report it.
+	newPort := closedPort(t)
+	for newPort == oldTarget.Port {
+		newPort = closedPort(t)
+	}
+	newTarget := Target{BackendID: 5, Address: "127.0.0.1", Port: newPort}
+	c.SetTargets([]Target{newTarget})
+	if !c.IsHealthy(5) {
+		t.Fatal("a reused backend ID should start healthy, like any new backend")
+	}
+	c.probeOne(newTarget)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(changes) != 2 || changes[0] || changes[1] {
+		t.Errorf("OnChange calls = %v, want two calls with healthy=false (X, then Y)", changes)
+	}
+}
+
+func TestProbeOneIgnoresStaleResultForReusedID(t *testing.T) {
+	called := false
+	c := newChecker(1, 1, func(uint32, bool) { called = true })
+	_, livePort := listenOn(t)
+	c.SetTargets([]Target{{BackendID: 5, Address: "127.0.0.1", Port: livePort}})
+
+	// A probe started for the old backend on ID 5 finishes after the reuse.
+	c.probeOne(Target{BackendID: 5, Address: "127.0.0.1", Port: closedPort(t)})
+	if called || !c.IsHealthy(5) {
+		t.Error("a probe result for the previous owner of an ID should be ignored")
+	}
+}
+
 func TestProbeOneIgnoresRemovedBackend(t *testing.T) {
 	port := closedPort(t)
 	called := false

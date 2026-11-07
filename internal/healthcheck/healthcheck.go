@@ -29,8 +29,15 @@ type Target struct {
 }
 
 type state struct {
+	target      Target // the backend this state was observed for
 	healthy     bool
 	consecutive int // consecutive results agreeing with the *opposite* of healthy
+}
+
+// sameBackend reports whether two targets probe the same backend. Backend IDs
+// are recycled, so an ID alone does not identify a backend.
+func sameBackend(a, b Target) bool {
+	return a.Address == b.Address && a.Port == b.Port
 }
 
 type Checker struct {
@@ -68,8 +75,16 @@ func (c *Checker) SetTargets(targets []Target) {
 	seen := map[uint32]bool{}
 	for _, t := range targets {
 		seen[t.BackendID] = true
-		if _, ok := c.states[t.BackendID]; !ok {
-			c.states[t.BackendID] = &state{healthy: true}
+		s, ok := c.states[t.BackendID]
+		switch {
+		case !ok || !sameBackend(s.target, t):
+			// New backend, or a freed ID reused for a different backend: start
+			// fresh, matching the dataplane, which marks new backends healthy.
+			// Keeping the old state would leave a dead backend marked healthy,
+			// because OnChange only fires on a transition.
+			c.states[t.BackendID] = &state{target: t, healthy: true}
+		default:
+			s.target = t // same backend; keep its history, pick up probe changes
 		}
 	}
 	for id := range c.states {
@@ -124,7 +139,8 @@ func (c *Checker) probeOne(t Target) {
 
 	c.mu.Lock()
 	s, exists := c.states[t.BackendID]
-	if !exists {
+	if !exists || !sameBackend(s.target, t) {
+		// Removed, or the ID now belongs to another backend: this result is stale.
 		c.mu.Unlock()
 		return
 	}
